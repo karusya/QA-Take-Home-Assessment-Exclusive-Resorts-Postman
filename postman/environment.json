@@ -1,0 +1,49 @@
+{
+  "id": "0034fc8f-b474-40b0-b7fb-da78728e1e5c",
+  "name": "Exclusive Resorts - Staging",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "https://public-site.stage.exclusiveresorts.com",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "qaFirstName",
+      "value": "QA Candidate",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "qaLastName",
+      "value": "Karina Zhdanova",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "qaEmail",
+      "value": "karina.zhd+test@gmail.com",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "qaPostalCode",
+      "value": "80202",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "qaPhone",
+      "value": "3035550100",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "lastP95Ms",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment"
+}
