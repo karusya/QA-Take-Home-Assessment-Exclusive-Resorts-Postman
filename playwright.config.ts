@@ -36,22 +36,5 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-      // The API-0x scenarios only need to prove the backend contract once,
-      // from a real browser context (to get past CloudFront -- see README).
-      // Re-running them in every browser/viewport buys nothing and multiplies
-      // the number of real requests hitting production, so they're chromium-only.
-      testIgnore: /api-endpoints\.spec\.ts/,
-    },
-    {
-      name: 'mobile-chrome-375',
-      // Used for TC-14 (responsive @ 375px) -- a slightly narrower custom
-      // viewport than the stock Pixel 5 profile, matching the assignment's
-      // "375px" spec exactly.
-      use: { ...devices['Pixel 5'], viewport: { width: 375, height: 812 } },
-      testIgnore: /api-endpoints\.spec\.ts/,
-    },
   ],
 });

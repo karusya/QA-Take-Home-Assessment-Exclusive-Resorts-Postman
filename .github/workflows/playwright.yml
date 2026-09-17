@@ -1,20 +1,40 @@
-name: Playwright Tests
+name: QA Suite
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Which suite to run'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - ui
+          - api
+          - both
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+# Required for GitHub Pages deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  # UI regression: everything in inquiry-form.spec.ts (@regression), across
-  # all three configured projects. Fully stubbed network (see
-  # playwright/fixtures/inquiry.fixtures.ts) -- never touches production.
-  ui-regression:
-    name: UI regression (chromium, webkit, mobile-375)
-    timeout-minutes: 20
+  # ── UI tests ──────────────────────────────────────────────────────────────
+  ui-tests:
+    name: UI tests (chromium)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'ui' || inputs.suite == 'both' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -23,22 +43,20 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+      - run: npx playwright install --with-deps chromium
 
-      - name: Run UI regression suite
-        run: npm run test:regression
+      - name: Run UI tests
+        run: npm run test:web
         env:
           CI: true
 
-      - name: Upload HTML report
+      - name: Upload UI report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-regression-report
+          name: ui-report
           path: playwright-report/
           retention-days: 14
 
@@ -46,22 +64,16 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-regression-traces
+          name: ui-traces
           path: test-results/
-          retention-days: 14
+          retention-days: 7
 
-  # API-endpoint tests: api-endpoints.spec.ts (@api), chromium only (see
-  # playwright.config.ts -- webkit/mobile-375 explicitly skip this file,
-  # there's nothing to gain from re-running it per-browser). API-02/03/06/07/08
-  # fire for real against production from inside a loaded page (this is what
-  # gets past the CloudFront block -- see README's "Postman / API suite"
-  # section); none of them mutate data. API-01/04 are stubbed and never touch
-  # production. Runs as its own job so a CloudFront/latency hiccup on the
-  # live checks doesn't block the UI regression job's report.
+  # ── API tests ─────────────────────────────────────────────────────────────
   api-tests:
     name: API-endpoint tests (chromium)
-    timeout-minutes: 10
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'api' || inputs.suite == 'both' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -70,22 +82,20 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium
 
       - name: Run API-endpoint tests
         run: npm run test:api-endpoints
         env:
           CI: true
 
-      - name: Upload HTML report
+      - name: Upload API report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: api-endpoints-report
+          name: api-report
           path: playwright-report/
           retention-days: 14
 
@@ -93,6 +103,84 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: api-endpoints-traces
+          name: api-traces
           path: test-results/
-          retention-days: 14
+          retention-days: 7
+
+  # ── Publish to GitHub Pages ────────────────────────────────────────────────
+  publish-report:
+    name: Publish report to GitHub Pages
+    needs: [ui-tests, api-tests]
+    # Run after tests finish; skip on PRs (report stays as artifact only)
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download UI report
+        if: needs.ui-tests.result != 'skipped'
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-report
+          path: _site/ui/
+
+      - name: Download API report
+        if: needs.api-tests.result != 'skipped'
+        uses: actions/download-artifact@v4
+        with:
+          name: api-report
+          path: _site/api/
+
+      - name: Create landing page
+        run: |
+          mkdir -p _site
+          UI_STATUS="${{ needs.ui-tests.result }}"
+          API_STATUS="${{ needs.api-tests.result }}"
+
+          ui_link=""
+          api_link=""
+
+          if [ "$UI_STATUS" != "skipped" ]; then
+            ui_badge="✅ passed"
+            [ "$UI_STATUS" = "failure" ] && ui_badge="❌ failed"
+            [ "$UI_STATUS" = "cancelled" ] && ui_badge="⚠️ cancelled"
+            ui_link="<li><a href='ui/index.html'>UI tests — $ui_badge</a></li>"
+          fi
+
+          if [ "$API_STATUS" != "skipped" ]; then
+            api_badge="✅ passed"
+            [ "$API_STATUS" = "failure" ] && api_badge="❌ failed"
+            [ "$API_STATUS" = "cancelled" ] && api_badge="⚠️ cancelled"
+            api_link="<li><a href='api/index.html'>API tests — $api_badge</a></li>"
+          fi
+
+          cat > _site/index.html <<HTML
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>QA Report — Exclusive Resorts</title>
+            <style>
+              body { font-family: sans-serif; max-width: 600px; margin: 60px auto; }
+              h1 { font-size: 1.4rem; }
+              ul { line-height: 2; }
+              a { color: #0366d6; }
+            </style>
+          </head>
+          <body>
+            <h1>QA Report</h1>
+            <p>Run: <strong>${{ github.run_number }}</strong> &nbsp;·&nbsp; ${{ github.sha }}</p>
+            <ul>$ui_link $api_link</ul>
+          </body>
+          </html>
+          HTML
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

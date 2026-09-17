@@ -151,12 +151,25 @@ export class InquiryPage extends BasePage {
     await select.getByText(option, { exact: true }).click();
   }
 
+  // click() marks the field as "touched" in FormKit, fill() sets the value,
+  // blur() commits it to FormKit's internal model. Without blur() FormKit
+  // never flushes the value and the field stays empty on submit.
+  private async fillFormKit(locator: Locator, value: string): Promise<void> {
+    await locator.click();
+    await locator.fill(value);
+    await locator.blur();
+  }
+
   async fillRequiredFields(data: InquiryFormData): Promise<void> {
-    await this.firstNameInput.fill(data.firstName);
-    await this.lastNameInput.fill(data.lastName);
-    await this.emailInput.fill(data.email);
-    await this.postalCodeInput.fill(data.postalCode);
-    await this.phoneInput.fill(data.phone);
+    await this.fillFormKit(this.firstNameInput, data.firstName);
+    await this.fillFormKit(this.lastNameInput, data.lastName);
+    // Register the wait BEFORE blur so we don't miss the response if it
+    // resolves faster than the next await. validate-email fires on blur.
+    const validateEmailDone = this.page.waitForResponse('**/validate-email/**');
+    await this.fillFormKit(this.emailInput, data.email);
+    await validateEmailDone;
+    await this.fillFormKit(this.postalCodeInput, data.postalCode);
+    await this.phoneInput.pressSequentially(data.phone);
     await this.toggleBoolean(this.contactMethodRadio(data.contactMethod), true);
 
     if (data.consent ?? true) {
