@@ -18,10 +18,10 @@ if (process.env.CI) {
  */
 export default defineConfig({
   testDir: './playwright/tests',
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1,
+  workers: process.env.CI ? 2 : undefined,
   reporter: reporters,
   use: {
     baseURL: 'https://public-site.stage.exclusiveresorts.com',
@@ -39,6 +39,11 @@ export default defineConfig({
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
+      // The API-0x scenarios only need to prove the backend contract once,
+      // from a real browser context (to get past CloudFront -- see README).
+      // Re-running them in every browser/viewport buys nothing and multiplies
+      // the number of real requests hitting production, so they're chromium-only.
+      testIgnore: /api-endpoints\.spec\.ts/,
     },
     {
       name: 'mobile-chrome-375',
@@ -46,6 +51,7 @@ export default defineConfig({
       // viewport than the stock Pixel 5 profile, matching the assignment's
       // "375px" spec exactly.
       use: { ...devices['Pixel 5'], viewport: { width: 375, height: 812 } },
+      testIgnore: /api-endpoints\.spec\.ts/,
     },
   ],
 });
