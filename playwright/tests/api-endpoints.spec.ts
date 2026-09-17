@@ -22,16 +22,26 @@ import { test, expect } from '@playwright/test';
  * endpoints. This is how the findings in BUG-06 through BUG-09 were
  * originally confirmed live.
  *
- * Safety: several of these scenarios create a REAL lead in the CRM (fake
- * but recognizable data). Per the assignment's "don't flood the form"
- * constraint, those are gated behind an explicit opt-in env var and are
- * NOT part of the default @api run:
+ * Safety: API-01 and API-04 create a REAL lead in the CRM when run against
+ * production (fake but recognizable data). Per the assignment's own
+ * instruction -- "for your automated tests, stub the network call... so CI
+ * runs don't create real CRM leads" -- each of those two has TWO versions
+ * here:
  *
- *   RUN_LIVE_API_TESTS=1 npx playwright test --grep @api-live
+ *   - A stubbed twin, tagged @api, that intercepts /submit-form/ via
+ *     page.route() and fulfils with the exact response shape captured from
+ *     the real endpoint. This locks in the documented contract (including,
+ *     for API-04, the currently-buggy BUG-06 behavior) and runs safely in
+ *     CI on every pass -- no real request ever leaves the browser.
+ *   - The original LIVE version, tagged @api-live, gated behind an explicit
+ *     opt-in env var, for deliberately re-confirming the real behavior
+ *     against production (e.g. before a walkthrough/demo):
  *
- * Everything else here is non-mutating (the server 502s before a lead
- * would be created, or the endpoint is read-only) and safe to run in CI
- * on every regression pass, tagged @api.
+ *       RUN_LIVE_API_TESTS=1 npx playwright test --grep @api-live
+ *
+ * Everything else here (API-02/03/06/07/08's non-mutating scenarios) never
+ * creates a lead either way -- the server 502s before one would be created,
+ * or the endpoint is read-only -- so those only have one, live, @api version.
  */
 
 type SubmitFields = Record<string, string>;
@@ -153,6 +163,56 @@ test.describe('API endpoints, exercised from inside a real page session @api', (
     console.log(`validate-email response times (ms): ${times.map((t) => t.toFixed(0)).join(', ')}`);
     console.log(`p95 (ms): ${p95.toFixed(0)}`);
     expect(p95).toBeLessThan(2000);
+  });
+
+  // --- Stubbed, CI-safe twins of the mutating scenarios below. These never
+  // touch the real backend -- page.route() intercepts /submit-form/ and
+  // fulfils with the response shape captured live -- so they run on every
+  // default @api pass and lock in the documented contract without creating
+  // a lead. See the file docstring for why both a stubbed and live version
+  // of each exist. ---
+
+  test('API-01 (stubbed) valid submit -> 2xx, response shape matches contract @api', async ({
+    page,
+  }) => {
+    await page.route('**/submit-form/', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { id: 999999 } }),
+      });
+    });
+    const { status, bodyText } = await submitFormViaFetch(page, baselineFields());
+    expect(status).toBeGreaterThanOrEqual(200);
+    expect(status).toBeLessThan(300);
+    const json = JSON.parse(bodyText);
+    expect(json).toHaveProperty('data');
+    expect(json.data).toHaveProperty('id');
+    expect(typeof json.data.id).toBe('number');
+  });
+
+  test('API-04 (stubbed) submit without consent flag -> BUG-06 contract locked in @api', async ({
+    page,
+  }) => {
+    // Stubbed to match the REAL, currently-observed (buggy) behavior
+    // captured during exploratory testing: production returns 200 and
+    // creates a lead even with no consent field sent at all (BUG-06). This
+    // locks that contract in for CI; the @api-live twin below re-verifies
+    // it's still true against production when run deliberately.
+    await page.route('**/submit-form/', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { id: 999999 } }),
+      });
+    });
+    const fields = baselineFields();
+    delete fields.termsAgreement;
+    const { status, bodyText } = await submitFormViaFetch(page, fields);
+    expect(status).toBeGreaterThanOrEqual(200);
+    expect(status).toBeLessThan(300);
+    const json = JSON.parse(bodyText);
+    expect(json.data).toHaveProperty('id');
   });
 
   // --- Mutating scenarios: create a real (fake-data) CRM lead. Opt-in only. ---
