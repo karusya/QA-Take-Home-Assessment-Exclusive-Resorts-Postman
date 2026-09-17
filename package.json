@@ -13,13 +13,11 @@
     "report": "playwright show-report",
     "typecheck": "tsc --noEmit",
     "test:api": "newman run postman/collection.json -e postman/environment.json",
-    "test:api-endpoints": "playwright test --grep @api",
-    "test:api-endpoints-live": "cross-env RUN_LIVE_API_TESTS=1 playwright test --grep @api-live"
+    "test:api-endpoints": "playwright test --grep @api"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@types/node": "^22.7.0",
-    "cross-env": "^7.0.3",
     "newman": "^6.2.1",
     "typescript": "^5.6.0"
   }

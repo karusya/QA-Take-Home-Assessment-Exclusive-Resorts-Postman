@@ -1,18 +1,18 @@
 name: Playwright Tests
 
-# Not wired to run automatically on this repo (there's no CI runner
-# configured for it yet) -- committed so the pipeline shape is reviewable
-# and can be enabled by removing the `if: false` guard below, or by
-# uncommenting the push/pull_request triggers once this repo has a home.
 on:
   workflow_dispatch: {}
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  test:
+  # UI regression: everything in inquiry-form.spec.ts (@regression), across
+  # all three configured projects. Fully stubbed network (see
+  # playwright/fixtures/inquiry.fixtures.ts) -- never touches production.
+  ui-regression:
+    name: UI regression (chromium, webkit, mobile-375)
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -29,8 +29,8 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Run Playwright tests
-        run: npm test
+      - name: Run UI regression suite
+        run: npm run test:regression
         env:
           CI: true
 
@@ -38,7 +38,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: ui-regression-report
           path: playwright-report/
           retention-days: 14
 
@@ -46,6 +46,53 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-traces
+          name: ui-regression-traces
+          path: test-results/
+          retention-days: 14
+
+  # API-endpoint tests: api-endpoints.spec.ts (@api), chromium only (see
+  # playwright.config.ts -- webkit/mobile-375 explicitly skip this file,
+  # there's nothing to gain from re-running it per-browser). API-02/03/06/07/08
+  # fire for real against production from inside a loaded page (this is what
+  # gets past the CloudFront block -- see README's "Postman / API suite"
+  # section); none of them mutate data. API-01/04 are stubbed and never touch
+  # production. Runs as its own job so a CloudFront/latency hiccup on the
+  # live checks doesn't block the UI regression job's report.
+  api-tests:
+    name: API-endpoint tests (chromium)
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run API-endpoint tests
+        run: npm run test:api-endpoints
+        env:
+          CI: true
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-endpoints-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-endpoints-traces
           path: test-results/
           retention-days: 14

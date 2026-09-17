@@ -67,10 +67,12 @@ TC-01 and TC-13 don't submit the form, so they run against the live page
 without any stubbing.
 
 **`playwright/tests/api-endpoints.spec.ts` is the one exception to "never
-touches the real backend"** — see the section below. Its non-mutating
+touches the real backend"** — see the section below. Its API-02/03/06/07/08
 scenarios do make real calls to `/submit-form/` and `/validate-email/` (by
-design, to prove real bug findings), but never create a CRM lead; its two
-mutating scenarios are opt-in only and excluded from the default run.
+design, to prove real bug findings), but never create a CRM lead — the
+server 502s first, or the endpoint is read-only. API-01/04 (the two
+scenarios that would otherwise create a lead) are stubbed instead, so no
+test in this file ever creates real data.
 
 ## Postman / API suite (§3.4) — and why it's paired with a Playwright fallback
 
@@ -94,22 +96,26 @@ both:
   `pm.test` assertions, parameterized environment, the real captured wire
   format. This is what to open to *read* the intended API contract and
   test rationale, and it's what CloudFront blocks from outside a browser.
-- **`playwright/tests/api-endpoints.spec.ts`** — the same 6 of the 8 API-0x
-  scenarios (API-02/03/06/07/08 + a validate-email baseline), actually
-  *passing* against production, because each request is fired via
-  `page.evaluate(() => fetch(...))` from inside a real, already-loaded
-  browser page — a genuine TLS fingerprint and session, not a cold HTTP
-  client, so CloudFront lets it through. This is how BUG-06 through BUG-09
-  were originally confirmed live. Run it with:
+- **`playwright/tests/api-endpoints.spec.ts`** — the same 8 API-0x
+  scenarios (minus API-05 — see below), run from inside a real,
+  already-loaded browser page via `page.evaluate(() => fetch(...))` — a
+  genuine TLS fingerprint and session, not a cold HTTP client, so
+  CloudFront lets it through. Run it with:
 
   ```bash
-  npm run test:api-endpoints          # safe, non-mutating scenarios — CI-friendly
-  npm run test:api-endpoints-live     # API-01 + API-04 — creates real CRM leads, opt-in only
+  npm run test:api-endpoints
   ```
 
-  The mutating scenarios (API-01, API-04) are gated behind
-  `RUN_LIVE_API_TESTS=1` and skipped by default — see the file's own
-  docstring for the full safety rationale.
+  API-02/03/06/07/08 fire for real against production (never creates a
+  lead — the server 502s first, or the endpoint is read-only), which is
+  how BUG-07 through BUG-09 were originally confirmed live. API-01 and
+  API-04 are stubbed (`page.route()` intercepts `/submit-form/` and
+  fulfils with the response shape captured live) so this suite never
+  creates a real CRM lead on any run — per the assignment's own
+  instruction to stub automated tests' network calls. Their live
+  confirmation (including BUG-06's real lead ID, `126850345`, created
+  with no consent field sent) was captured once, by hand, during
+  exploratory testing — see BUG-REPORT.md and the file's own docstring.
 
 `postman/collection.json` + `postman/environment.json` hit the two real
 backend endpoints directly (no browser involved), captured by watching
@@ -178,11 +184,13 @@ staging endpoint or a sandboxed CRM tenant to run it safely and repeatably,
 or run it once, deliberately, with a person present.
 
 **Be a responsible tester with this collection.** API-01, API-04, and
-API-08 each create one real (clearly-fake-data) lead in the CRM — run them
-once, not in a loop, and remember they'll 403 from outside a browser (see
-above) — use `npm run test:api-endpoints-live` for a working equivalent of
-API-01/04. API-02/03/06 are safe to re-run since the server never gets far
-enough to create a lead. API-07 is designed to be re-run freely.
+API-08 each create one real (clearly-fake-data) lead in the CRM if actually
+run against production — run them once, not in a loop, and remember they'll
+403 from outside a browser (see above). The Playwright suite's stubbed
+equivalents of API-01/04 (`npm run test:api-endpoints`) never create a
+lead, by design — see the "Postman / API suite" section above.
+API-02/03/06 are safe to re-run since the server never gets far enough to
+create a lead. API-07 is designed to be re-run freely.
 
 **Environment note (Newman + Node 22):** running `npm run test:api` under
 Node 22 currently crashes inside Newman's own dependency chain
@@ -198,12 +206,22 @@ doesn't share this issue.
 
 ## CI
 
-`.github/workflows/playwright.yml` runs the full suite against
-Chromium + WebKit and uploads the HTML report (and traces on failure) as
-build artifacts. It's committed with only a `workflow_dispatch` trigger —
-intentionally **not** wired to run on every push yet, since this repo has
-no permanent home/branch protection set up. Flip on the commented
-`push`/`pull_request` triggers once it does.
+`.github/workflows/playwright.yml` runs on every push/PR to `main` (and
+on-demand via `workflow_dispatch`), as two independent jobs so a hiccup in
+one doesn't block the other's report:
+
+- **`ui-regression`** — `npm run test:regression` (all of
+  `inquiry-form.spec.ts`, tagged `@regression`) across Chromium, WebKit, and
+  the 375px mobile viewport. Fully stubbed network — never touches
+  production.
+- **`api-tests`** — `npm run test:api-endpoints` (all of
+  `api-endpoints.spec.ts`, tagged `@api`), Chromium only. API-02/03/06/07/08
+  fire for real against production from inside a loaded page (that's what
+  gets past CloudFront — see the section above); none of them mutate data.
+  API-01/04 are stubbed and never touch production either.
+
+Both jobs upload their HTML report (and traces on failure) as build
+artifacts, downloadable from the Actions run summary.
 
 ## Project layout
 
@@ -236,8 +254,7 @@ BUG-REPORT.md
   suite.** While authoring the Postman collection, combining an injection
   payload with a real POST to the live CRM was blocked by a safety control
   in the tooling I used, and I didn't attempt to route around it. It also
-  has no `@api-live` Playwright equivalent, unlike API-01/04 — I didn't
-  reintroduce it once I found the browser-session workaround, for the same
+  has no Playwright equivalent in `api-endpoints.spec.ts`, for the same
   reason. The request is fully built and ready in
   `postman/collection.json` (see its description) for someone with
   authorization to run it deliberately, once the CloudFront block is
